@@ -12,6 +12,7 @@ init
 
 	var serverScanner = new SignatureScanner(game, server.BaseAddress, server.ModuleMemorySize);
 	
+	// find the pointer that contains the pointer to CGameMovement
 	var CGameMovementSig = new SigScanTarget();
 	CGameMovementSig.AddSignature(1, "A1 ?? ?? ?? ?? FF 31 8B 30");
 	CGameMovementSig.OnFound = (proc, scanner, ptr) => {
@@ -21,6 +22,7 @@ init
 	vars.CGameMovementPtr = serverScanner.Scan(CGameMovementSig);
 	vars.ReportPointer("CGameMovement", vars.CGameMovementPtr);
 
+	// find the function that writes to the aforementioned pointer, this will write bms' vftable pointer to it
 	byte[] b = BitConverter.GetBytes(vars.CGameMovementPtr.ToInt32());
 	string bmsGameMovementSigRaw = String.Format("C7 05 {0:X02} {1:X02} {2:X02} {3:X02}", b[0], b[1], b[2], b[3]);
 	var bmsGameMovementSig = new SigScanTarget(6, bmsGameMovementSigRaw);
@@ -31,6 +33,7 @@ init
 	var bmsGameMovementPtr = serverScanner.Scan(bmsGameMovementSig);
 	vars.ReportPointer("bms CGameMovement", bmsGameMovementPtr);
 
+	// find hl2's vftable pointer by searching the pointer for the 2nd function under it
 	var hl2GameMovementSig = new SigScanTarget(0, "55 8B EC 8B 45 ?? 57 FF 75 ??");
 	hl2GameMovementSig.OnFound = (proc, scanner, ptr) => {
 		vars.ReportPointer("2nd function under hl2's CGameMovement", ptr);
@@ -41,15 +44,16 @@ init
 		var s_ptr = IntPtr.Zero;
 		s_timer.Start();
 		uint serverEndAddress = (uint)server.BaseAddress + (uint)server.ModuleMemorySize;
+		var s_target = new SigScanTarget(-4, String.Format("{0:X02} {1:X02} {2:X02} {3:X02}", f_bytesPtr[0], f_bytesPtr[1], f_bytesPtr[2], f_bytesPtr[3]));
+		// because this function is used by both bms' and hl2's cgamemovement we'll have to filter out bad results
 		do
 		{
-			var s_target = new SigScanTarget(-4, String.Format("{0:X02} {1:X02} {2:X02} {3:X02}", f_bytesPtr[0], f_bytesPtr[1], f_bytesPtr[2], f_bytesPtr[3]));
 			s_ptr = s_scanner.Scan(s_target);
 			if (s_ptr == bmsGameMovementPtr)
 				s_scanner = new SignatureScanner(game, s_ptr + 0x8, (int)(serverEndAddress - (uint)(s_ptr + 0x8)));
 			else break;
 		}
-		while (s_timer.ElapsedMilliseconds < 5000);
+		while (s_timer.ElapsedMilliseconds < 5000); // timeout after 5 seconds
 		s_timer.Stop();
 		return s_ptr;
 	};
@@ -65,6 +69,8 @@ init
 startup
 {
 	vars.functional = false;
+
+	// we define these here to allow access from shutdown {}
 	vars.CGameMovementPtr = IntPtr.Zero;
 	vars.hl2CGPtrBytes = new byte[] {0x0, 0x0, 0x0, 0x0};
 	vars.bmsCGPtrBytes = new byte[] {0x0, 0x0, 0x0, 0x0};
