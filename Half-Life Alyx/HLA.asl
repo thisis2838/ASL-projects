@@ -170,15 +170,11 @@ init
 					vars.print("[ENTFINDING] Successfully found " + name + "'s pointer after " + prof.ElapsedMilliseconds * 0.001f + " seconds, index #" + i);
 					return entPtr;
 				}
-				else
-				{
-					continue;
-				}
+				else continue;
 			}
 			prof.Stop();
 			vars.print("ENTFINDING] Can't find " + name + "'s pointer! Time spent: " + prof.ElapsedMilliseconds * 0.001f + " seconds");
 		}
-		
 		return IntPtr.Zero;
 	};
 	
