@@ -346,10 +346,14 @@ isLoading
 
 start
 {
-    return (settings["AutostartILs"] && vars.hostState.Current == 6 && vars.signOnState.Changed);
+
+}
+
+reset
+{
+
 }
 
 split
 {
-    return (vars.hostState.Current == 3 && vars.hostState.Changed && !vars.startmaps.Contains(vars.mapName.Current)); // https://github.com/fatalis/SourceSplit/blob/1056cc59c662e3cb7d77e64aef8bbc26c1e90061/GameMemory.cs#L891-L892
 }
