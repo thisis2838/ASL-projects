@@ -1,8 +1,8 @@
 // DETHKARZ AUTOSPLITTER
-// OCTOBER 2021
+// SOMETIME AFTER 17TH OCTOBER 2021 (im not bothered to update this)
 // CREDITS
-// development		2838
-// testing			Brionac, Bantaris
+// 2838		development
+// Brionac	testing
 
 state("Dethkarz")
 {
@@ -26,16 +26,16 @@ startup
 	vars.prints = prints;
 
 	settings.Add("start", true, "Auto-Starting");
-	settings.Add("start-gaincontrol", false, "Start when you gain control of the car", "start");
+	settings.Add("start-gaincontrol", true, "Start when you gain control of the car", "start");
 	settings.Add("start-lap", true, "Start on 1st lap", "start");
 	settings.Add("start-everylap", false, "IL Mode - Start on any lap", "start");
 	settings.SetToolTip("start-everylap", "Start on any lap regardless if the timer is running or not");
 
 	settings.Add("split", true, "Splitting");
-	settings.Add("split-gaincontrol", false, "Split when you gain control of the car", "split");
+	settings.Add("split-gaincontrol", true, "Split when you gain control of the car", "split");
 	settings.Add("split-end", true, "Split at the end of races", "split");
 	settings.Add("split-laps", true, "Split on laps", "split");
-	settings.Add("split-ignore1st", false, "Don't split on beginning the first lap", "split-laps");
+	settings.Add("split-ignore1st", true, "Don't split on beginning the first lap", "split-laps");
 	settings.Add("split-checkpoint", false, "Split on reaching new Checkpoint", "split");
 	vars.listCheckpointMod = new List<int>(new int[] {5, 10, 20, 30});
 	foreach (int x in vars.listCheckpointMod)
@@ -43,14 +43,14 @@ startup
 
 	settings.Add("time", true, "Timing");
 	settings.Add("time-pauses", true, "Time pauses", "time");
-	settings.Add("time-menu", false, "Time menuing", "time");
+	settings.Add("time-menu", true, "Time menuing", "time");
 	settings.Add("time-prerace", false, "Time pre-race camera pan and countdown", "time");
 	settings.Add("time-postrace", false, "Time post-race results screen", "time");
 
 	vars.listInjections = new List<Tuple<IntPtr, byte[]>>();
 
+    vars.fCurTime = 0f;
 	vars.fTotalLapTime = 0f;
-	vars.fMiscTime = 0f;
 
 	vars.bLoading = false;
 	vars.bPaused = false;
@@ -171,25 +171,11 @@ init
 	{
 		return (vars.IsNotInMap() 
 		|| (current.pCamera != 0 
-		&& (vars.mwLaps.Current == -1 || (current.nRaceState < 3 || vars.mwLaps.Current == -1) || current.nRaceState == 6 
+		&& (vars.mwLaps.Current == -1 || current.nRaceState < 3 || current.nRaceState == 6 
 		|| (vars.mwLapTimer.Old == vars.mwLapTimer.Current && vars.mwLapTimer.Current == 0))));
 	};
 	vars.IsNotInRace = IsNotInRace;
-	
-	Func<float> CurTime = () =>
-	{
-		// total accumulated lap times + miscellaneous alignment / menuing and pausing time + current lap timer time
-		return vars.fTotalLapTime + vars.fMiscTime + vars.mwLapTimer.Current;
-	};
-	vars.CurTime = CurTime;
-
-	vars.TimerStartHandler = (EventHandler)((s, e) => 
-	{
-		vars.fTotalLapTime = 0f;
-		vars.fMiscTime = vars.mwLapCalled.Changed ? 0 : -vars.mwLapTimer.Current;
-	});
-	timer.OnStart += vars.TimerStartHandler;
-
+	vars.oldCurTime = 0;
 }
 
 update
@@ -201,10 +187,7 @@ update
 		vars.bLoading = true;
 
 	if (old.pCamera == 0 && current.pCamera != 0)
-	{
 		vars.bLoading = false;
-		vars.fMiscTime += vars.mwLapTimer.Current;
-	}
 
 	if (old.pLastFunc != 0x4fe788 && !vars.bLoading)
 	{
@@ -216,58 +199,74 @@ update
 
 		float delta = 0;
 		float globalDelta = (current.nGlobalTimerTick - old.nGlobalTimerTick) * current.fRate;
+		float lapDelta = vars.mwLapTimer.Current - vars.mwLapTimer.Old;
 
 		// are we in a race?
 		if (inGame)
 		{
 			// are we paused? if so make sure we count pause time
-			if (!(current.bIsPaused && !settings["time-pauses"]))
+			if (!(current.bIsPaused && lapDelta == 0 && !settings["time-pauses"]))
 				// is the lap timer paused?
 				if (lapTimerPaused)
 				{
 					// if so and we aren't paused then make sure allow timing pre/post race
-					if ((settings["time-prerace"] && (current.nRaceState < 3 || vars.mwLaps.Current == -1)) 
-					|| (settings["time-postrace"] && current.nRaceState == 6))
+					if ((settings["time-prerace"] && current.nRaceState < 3) 
+					&& (settings["time-postrace"] && current.nRaceState == 6))
 						delta = globalDelta;
 				}
-				else if (current.bIsPaused)
-					delta = globalDelta;
+				else
+					// use the global timer if we're paused
+					delta = (current.bIsPaused) ? globalDelta : lapDelta;
 		}
 		// if not make sure we allow timing menus
 		else if (timeMenu)
 			delta = globalDelta;
 
-		vars.fMiscTime += delta;
-
+		if (delta < 0f)
+			delta = vars.mwLapTimer.Current;
+		
+		// the lap time advances ever so slightly after the lap ends before it is reset
+		// so we'll have to account for that
+		// new current time = old current time - (lap timer before reset - last lap time) + lap timer now 
 		bool lapAdvance = (vars.mwLaps.Current != vars.mwLaps.Old && vars.mwMaxLaps.Current > 0);
 		bool lapLast = lapAdvance && vars.mwMaxLaps.Current == vars.mwLaps.Current;
-		bool lapFirst = lapAdvance && vars.mwMaxLaps.Current > 0 && vars.mwLaps.Current + 1 == 1;
+		bool lapFirst = vars.mwMaxLaps.Current > 0 && vars.mwLaps.Current + 1 == 1;
 
-		if (vars.mwLapReset.Changed || lapFirst)
+		if (vars.mwLapReset.Changed)
 		{
-			vars.fTotalLapTime += vars.mwLastLapTime.Current;
+			delta = vars.mwLastLapTime.Current - vars.mwLapTimer.Old;
+			vars.fCurTime += delta;
 
-			if (!lapFirst)
-				vars.prints("TIMING", "Lap end at " + vars.mwLastLapTime.Current);
+			vars.TimerModel.CurrentState.SetGameTime(TimeSpan.FromSeconds(vars.fCurTime));
 
-			vars.TimerModel.CurrentState.SetGameTime(TimeSpan.FromSeconds(vars.CurTime() - vars.mwLapTimer.Current));
-
-			if ((settings["split-laps"] && !(lapFirst && settings["split-ignore1st"])) || (settings["split-end"] && lapLast))
+			if ((settings["split-laps"] && !(settings["split-ignore1st"] && lapFirst)) 
+			|| (settings["split-end"] && lapLast))
+			{	
 				vars.TimerModel.Split();
+				vars.oldCurTime = vars.fCurTime;
+			}
 
-			if (!lapLast && settings["start-everylap"])
+			if (settings["start-everylap"])
 			{
 				vars.TimerModel.Reset();
+				vars.fCurTime = vars.mwLapTimer.Current;
 				vars.TimerModel.Start();
-				vars.TimerStartHandler(null, null);
 				return;
 			}
 
-			if (lapLast)
-				vars.fMiscTime -= vars.mwLapTimer.Current;
+			vars.prints("TIMING", "Lap end at " + vars.mwLastLapTime.Current + ", " + delta + " off old lap time");
+			vars.prints("TIMING", "Lap time current is " + vars.mwLapTimer.Current + " and old is " + vars.mwLapTimer.Old);
+			if (!lapLast)
+			{
+				float oldCurTime = vars.fCurTime;
+				vars.fCurTime += vars.mwLapTimer.Current;
+				vars.prints("TIMING", "Adjusted timer: " + oldCurTime + " -> " + vars.fCurTime);
+			}
 		}
+		else
+			vars.fCurTime += delta > 0 ? delta : 0;
 
-		//print(vars.fTotalLapTime + " " + vars.fMiscTime + " " + vars.mwLapTimer.Current);
+		//print(vars.mwLastLapTime.Current + " " + vars.mwLapTimer.Current + " " + vars.mwLapTimer.Old + " " + ((vars.fCurTime - vars.oldCurTime) - vars.mwLapTimer.Current) + " " + delta);
 	}
 }
 
@@ -285,12 +284,17 @@ split
 
 start
 {
+	vars.fCurTime = 0f;
+
 	if (!settings["start"] || vars.IsNotInMap())
 		return false;
 	if (settings["start-gaincontrol"] && current.nRaceState == 3 && old.nRaceState == 2)
 		return true;
 	if (settings["start-lap"] && vars.mwLapCalled.Changed)
+	{
+		vars.fCurTime += vars.mwLapTimer.Current;
 		return true;
+	}
 }
 
 isLoading
@@ -302,16 +306,9 @@ shutdown
 {
 	foreach (Tuple<IntPtr, byte[]> injection in vars.listInjections)
 		game.WriteBytes(injection.Item1, injection.Item2);
-
-	timer.OnStart -= vars.TimerStartHandler;
-}
-
-exit
-{
-	vars.fMiscTime += vars.mwLapTimer.Current;
 }
 
 gameTime
 {
-	return TimeSpan.FromSeconds(vars.CurTime());
+	return TimeSpan.FromSeconds(vars.fCurTime);
 }

@@ -1,5 +1,5 @@
 // HLVR AUTO SPLITTER 
-// VERSION 2.7 - OCTOBER 10 2021
+// VERSION 2.7 - OCTOBER 15 2021
 // CREDITS: 
 	// Lyfeless and DerkO for starting the project, initial load removal and splitting code
 	// 2838 for Auto-Start, Auto-End, entity list, sigscanning and memory injection shenanigans
@@ -57,9 +57,9 @@ startup
 	settings.Add("split", true, "Auto Split");
 	settings.Add("split-type1", true, "Split on detected map change", "split");
 	settings.Add("changelevelsplit", true, "Use new method for detecting splits", "split-type1");
-	settings.SetToolTip("changelevelsplit", "Splits on detected game changelevel, works with campaign mods that change dictMaps through changelevel triggers");
+	settings.SetToolTip("changelevelsplit", "Splits on detected game changelevel, works with campaign mods that change maps through changelevel triggers");
 	settings.Add("split-type2", false, "Split on Chapters", "split");
-	settings.SetToolTip("split-type2", "Split on Chapter Transitions Instead of Per-Map");
+	settings.SetToolTip("split-type2", "Split on Chapter transitions instead of Per-Map");
 	settings.Add("split-type3", false, "Split on getting achievements", "split");
 	settings.Add("split-type4", false, "Split on collecting enough resins", "split");
 	settings.SetToolTip("split-type4", "Splits on collecting the maximum possible number of resin in a level");
@@ -75,10 +75,10 @@ startup
 	settings.Add("resinexclude-a3_hotel_street", true, "2 resin in a3_hotel_street", "resinexclude");
 	settings.SetToolTip("resinexclude-a3_hotel_street", "The resin in the floor down to which the player enters and immediately changelevel");
 
-	settings.Add("splitsrename", true, "Dynamically rename current splits depening on splitting context");
-	settings.Add("splitsrename-type3", true, "Rename to obtained achievement", "splitsrename");
-	settings.Add("splitsrename-type4", true, "Rename according to number of resins upon collecting enough resin", "splitsrename");
+	settings.Add("splitsrename", false, "Dynamically rename current splits depending on splitting context", "split");
 	settings.Add("splitsrename-type1", true, "Rename according to last map's name upon changing level", "splitsrename");
+	settings.Add("splitsrename-type3", true, "Rename to obtained achievement", "splitsrename");
+	settings.Add("splitsrename-type4", false, "Rename according to number of resin upon collecting enough", "splitsrename");
 
 #endregion
 
@@ -270,9 +270,7 @@ startup
 init
 {
 
-#region SIGNATURE SCANNING
-#region 	FUNCTIONS
-#region 	SIGSCANNING
+#region FUNCTIONS
 	// hla accesses static data not by using absolute pointers but using an offset off to the very next instruction instead
 	// so we'll have to specify the size of the instruction
     Func<IntPtr, int, int, IntPtr> GetPointerFromOpcode = (ptr, trgOperandOffset, totalSize) =>
@@ -291,8 +289,7 @@ init
 		else
 			vars.print("[SIGSCANNING] " + name + " ptr was found at " + ptr.ToString("X"));
 	};
-#endregion
-#region 	PROCESS/MODULE RELATED
+
 	Func<string, ProcessModuleWow64Safe> GetModule = (moduleName) =>
 	{
 		return modules.FirstOrDefault(x => x.ModuleName.ToLower() == moduleName);
@@ -306,8 +303,7 @@ init
 			throw new Exception(moduleName + " isn't loaded!");
 		return new SignatureScanner(game, proc.BaseAddress, proc.ModuleMemorySize);
 	};
-#endregion
-#region 	INJECTION LIST FUNCTIONS
+
 
 	vars.listInjections.Clear();
 	Action<IntPtr, byte[], byte[]> InjectionListAdd = (ptr, bytesOrig, bytesNew) =>
@@ -323,9 +319,8 @@ init
 	};
 
 #endregion
-#endregion
-#region 	IN-GAME VARIABLES
-#region 		SIGNATURES
+
+#region SIGSCANNING
 	var sigEntList 		=	new SigScanTarget(6, 	"40 ?? 48 ?? ?? ??", 
 													"48 ?? ?? ?? ?? ?? ??", // MOV RAX,qword ptr [DAT_1814e3bc0]
 													"8b ?? 48 ?? ?? ?? ?? ?? ?? 48 ?? ?? ff ?? ?? ?? ?? ?? 4c ?? ??");
@@ -349,8 +344,7 @@ init
 													"48 8B DA 48 85 C9 0F 84 ?? ?? ?? ?? 48 8B 01");
 	var sigSignOnState	=	new SigScanTarget(0,	"48 8B 05 ?? ?? ?? ??", // MOV RAX,qword ptr [signOnState base]
 													"48 8B D9 48 8D 0D ?? ?? ?? ?? FF 90 ?? ?? ?? ?? 48 85 C0 74 ?? 4C 8B 00");
-#endregion
-#region 		SCANNING
+
 	var swProfiler = Stopwatch.StartNew();
 	
 	// 2838: init process scanners (looks ugly but makes it so it doesn't take 10 seconds to scan)
@@ -378,10 +372,10 @@ init
 	ReportPointer(ptrMapName, "mapName");
 	ReportPointer(ptrNoVr, "noVr");
 	ReportPointer(ptrSignOnState, "signOnState base");
+
 #endregion
-#endregion
-#region 	ACHIEVEMENT FUNCTION INJECTION
-#region 		LOCATE CODESPACE
+
+#region ACHIEVEMENT INJECTION
 	var scannerAI = new SignatureScanner(game, scannerServer.Address, scannerServer.Size);
 	IntPtr ptrAIScannerEnd = scannerServer.Address + scannerServer.Size;
 	IntPtr ptrAchievement = IntPtr.Zero;
@@ -417,32 +411,25 @@ init
 	ReportPointer(ptrAchievement, "achievement stuff - injection codespace");
 	if (ptrAchievement == IntPtr.Zero)
 		goto skipachieve;
-#endregion
-#region 		FUNCTION FINDING
-#region FIND ACHIEVEMENT HANDLING FUNCTION
+
 	// find the instruction at the beginning of the function which handles achievements
 	IntPtr ptrAIFunc1 = scannerServer.Scan(new SigScanTarget("FF 50 ?? 84 C0 0F 85 ?? ?? ?? ?? 48 8B 03"));
 	ReportPointer(ptrAIFunc1, "achievement stuff - general achievement handling function");
 	if (ptrAIFunc1 == IntPtr.Zero)
 		goto skipachieve;
-#endregion
 
-#region FIND SPECIAL EVENT HANDLING FUNCTION
 	// find the instruction at the beginning of the function which handles special event queueing
 	IntPtr ptrAIFunc2 = scannerServer.Scan(new SigScanTarget("40 57 48 83 EC 20 48 8B 41 ?? 48 8B F9 48 83 C1 10"));
 	ReportPointer(ptrAIFunc2, "achievement stuff - special event evaluation function");
 	if (ptrAIFunc2 == IntPtr.Zero)
 		goto skipachieve;
-#endregion
-#endregion
-#region 		BYTE CODE
+
 
 	// begin assembling commands
 	IntPtr ptrAIBegin = ptrAchievement + 0x8;
 	
-	// figure out offsets for the asm instructions
+	// figure out offsets for the asm instructions, we cant WriteJumpInstruction because allocation crashes the game
 
-#region 			OFFSETS
 	// offset between stored pointer location and first instruction, should always be 8
 	int off1 = (int)((long)(ptrAchievement) - (long)(ptrAIBegin + 0x7));
 	byte[] off1Bytes = BitConverter.GetBytes(off1);
@@ -452,8 +439,7 @@ init
 	// offset for the jump from the original function to our injected code
 	int off3 = (int)((long)ptrAIBegin - (long)(ptrAIFunc1 + 0x5));
 	byte[] off3Bytes = BitConverter.GetBytes(off3);
-#endregion
-#region 			BYTE ARRAYS
+
 	// prepare byte arrays for writing 
 
 	byte[] arrAIFunc1New = new byte[] 
@@ -474,8 +460,7 @@ init
 		0xB0, 0x01,																	// mov		al, 01
 		0xC3																		// ret
 	}; 
-#endregion
-#region 			INJECTION
+
 	// store to injection list
 	InjectionListAdd(ptrAIFunc1, memory.ReadBytes(ptrAIFunc1, 5), jmpBytes);
 	InjectionListAdd(ptrAIFunc2, memory.ReadBytes(ptrAIFunc2, 3), arrAIFunc2New);
@@ -488,15 +473,12 @@ init
 	memory.WriteBytes(ptrAchievement, BitConverter.GetBytes(0xFFFFFFFFFFFFFFFF));
 
 	goto complete;
-#endregion
 
 skipachieve:
 	vars.print("Achievement splitting code failed to inject!");
 
-#endregion
 complete:
 	vars.ptrAchievement = ptrAchievement;
-#endregion
 	swProfiler.Stop();
 	vars.print("[SIGSCANNING] Signature scanning done in " + swProfiler.ElapsedMilliseconds * 0.001f + " seconds");
 
@@ -688,7 +670,6 @@ complete:
 #endregion
 }
 
-
 update
 {
 	vars.mwlMaster.UpdateAll(game);
@@ -762,7 +743,6 @@ update
 		if (vars.mwMap.Current == "startup" || vars.mwMap.Current == "")
 			return -1;
 
-#region 	MAP CHANGE
 		if (settings["changelevelsplit"])
 		{
 			if (vars.mwMap.Changed && !vars.listVisitedMaps.Contains(vars.mwMap.Current))
@@ -797,16 +777,16 @@ update
 			else if (settings["split-type1"] && vars.dictMaps[vars.mwMap.Current.ToLower()].Item2 == vars.dictMaps[vars.mwMap.Old.ToLower()].Item2 + 1)
 				return 1;
 		} 
-#endregion
-#region 	RESIN SPLIT
+
+		// check resin
 		if (settings["split-type4"] && vars.mwResinCount.Changed && vars.mwSignOnState.Current == 6)
 			if (!vars.listSplitResinMaps.Contains(vars.mwMap.Current) && vars.CheckResin())
 			{
 				vars.listSplitResinMaps.Add(vars.mwMap.Current);
 				return 4;
 			}
-#endregion
-#region 	ACHIEVEMENT SPLIT
+
+		// check achievements
 		if (vars.ptrAchievement != IntPtr.Zero)
 		{
 			if (memory.ReadValue<ulong>((IntPtr)vars.ptrAchievement) != 0xFFFFFFFFFFFFFFFF)
@@ -842,8 +822,7 @@ update
 				}
 			}
 		}	
-#endregion
-#region 	ENDING CONDITIONAL
+
 		//Ending Conditional
 		if (vars.mwMap.Current == "a5_ending" && vars.mwLoading.Current == 0)
 		{
@@ -853,7 +832,6 @@ update
 
 		return -1;
 	};
-#endregion
 #endregion
 
 	vars.Split(CheckSplit());
