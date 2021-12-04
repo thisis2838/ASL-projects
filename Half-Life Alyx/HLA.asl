@@ -15,13 +15,13 @@ startup
     // DEBUG SPEW
     var dictDebugSwitches = new Dictionary<string, bool>()
     {
-        {"DISABLE",                false},
-        {"ALL",                    true},
-        {"[ACHIEVEMENTS]",        true},
-        {"[GAMESTATE]",            false},
-        {"[TIMER]",                false},
-        {"[SIGSCANNING]",        true},
-        {"[GAME INFO]",            false},
+        {"DISABLE",             true},
+        {"ALL",                 true},
+        {"[ACHIEVEMENTS]",      true},
+        {"[GAMESTATE]",         false},
+        {"[TIMER]",             false},
+        {"[SIGSCANNING]",       true},
+        {"[GAME INFO]",         false},
         {"[ENTFINDING]",        true},
     };
 
