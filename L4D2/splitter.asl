@@ -209,13 +209,12 @@ init
     // get "clientterrorgun.cpp" string reference
     IntPtr terrorGunStrPtr = clientScanner.Scan(new SigScanTarget(GetByteStringS("\\clientterrorgun.cpp\0")));
     ShortOut(terrorGunStrPtr, "terrorGunStrPtr");
-    // backtrace until the first null byte to get the full string
-    while (game.ReadValue<byte>((terrorGunStrPtr = terrorGunStrPtr - 1)) != 0x00);
-    terrorGunStrPtr = terrorGunStrPtr + 1;
+    // try and find a result from sigscanning every byte until we get a result. expensive but this is the most reliable way to pull out a string reference
+    while ((tmp = clientScanner.Scan(new SigScanTarget("68" + GetByteStringU((uint)terrorGunStrPtr)))) == IntPtr.Zero)
+        terrorGunStrPtr = terrorGunStrPtr - 1;
     // init a tmp scanner for later
     tmpScanner = new SignatureScanner(game, clientScanner.Address, clientScanner.Size);
 hasControlScanAgain:
-    tmp = tmpScanner.Scan(new SigScanTarget("68" + GetByteStringU((uint)terrorGunStrPtr)));
     ShortOut(tmp, "terrorGunStrPtr ref");
     for (int i = 0; ; i++)
     {
@@ -228,6 +227,7 @@ hasControlScanAgain:
         if (game.ReadValue<byte>(tmp + i) == 0x68 && Math.Abs(game.ReadValue<uint>(tmp + i + 1) - (uint)muzzleSmokeStrPtr) < 2)
         {
             tmpScanner = new SignatureScanner(game, tmp + 0x20, (int)(tmpScanner.Address + tmpScanner.Size) - (int)(tmp + 0x20));
+            tmp = tmpScanner.Scan(new SigScanTarget("68" + GetByteStringU((uint)terrorGunStrPtr)));
             goto hasControlScanAgain;
         }
 
